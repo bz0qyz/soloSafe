@@ -1,4 +1,8 @@
 #!/usr/bin/env bash -e
+
+APP_NAME='tls-ssgen'
+APP_VER='0.0.1'
+
 # Argument Defaults
 declare -a CRT_DNS_SANS
 declare -a CRT_IP_SANS
@@ -13,6 +17,7 @@ CRT_SANS=""
 CRT_SIG_ALG='sha512'
 CRT_ECC_CURVE='prime256v1'
 CRT_DAYS=365
+KEY_PW=""
 CRT_SUBJ_CN='localhost.localdomain'
 CRT_SUBJ_O=""
 CRT_SUBJ_OU=""
@@ -22,7 +27,8 @@ CRT_SUBJ_L=""
 CRT_SUBJ_E=""
 V3_REQ_OPTS=""
 CREATE_PFX=false
-LH_DNS_SANS=("localhost" "localhost.localdomain" "lvh.me")
+PFX_EXPORT_PW=""
+LH_DNS_SANS=("localhost" "localhost.localdomain")
 LH_IP_SANS=("::1" "127.0.0.1")
 
 function is_unique() {
@@ -45,20 +51,6 @@ POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   key="$1"
   case $key in
-    --san-dns)
-      if $(is_unique "${2}" ${CRT_DNS_SANS}); then
-        CRT_DNS_SANS+=("${2}")
-      fi
-      shift # past argument
-      shift # past value
-      ;;
-    --san-ip)
-      if $(is_unique "${2}" ${CRT_IP_SANS}); then
-        CRT_IP_SANS+=("${2}")
-      fi
-      shift # past argument
-      shift # past value
-      ;;
     -cn|--cn)
       CRT_SUBJ_CN="${2}"
       shift # past argument
@@ -94,15 +86,30 @@ while [[ $# -gt 0 ]]; do
         shift # past argument
         shift # past value
         ;;
+    --san-dns)
+      if $(is_unique "${2}" ${CRT_DNS_SANS}); then
+        CRT_DNS_SANS+=("${2}")
+      fi
+      shift # past argument
+      shift # past value
+      ;;
+    --san-ip)
+      if $(is_unique "${2}" ${CRT_IP_SANS}); then
+        CRT_IP_SANS+=("${2}")
+      fi
+      shift # past argument
+      shift # past value
+      ;;
     -l|--localhost)
       ## Add all default localhost SANs
+      log_shell "INFO: Adding localhost SANs"
       for san in ${LH_DNS_SANS[@]}; do
-          if [[ $(is_unique "${san}" ${CRT_DNS_SANS}) ]]; then
+          if $(is_unique "${san}" ${CRT_DNS_SANS}); then
             CRT_DNS_SANS+=("${san}")
           fi
       done
       for san in ${LH_IP_SANS[@]}; do
-          if [[ $(is_unique "${san}" ${CRT_IP_SANS}) ]]; then
+          if $(is_unique "${san}" ${CRT_IP_SANS}); then
             CRT_IP_SANS+=("${san}")
           fi
       done
@@ -123,6 +130,11 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    -kp|--key-password)
+      KEY_PW="${2}"
+      shift # past argument
+      shift # past value
+      ;;
     -o|--output-dir)
       WORKDIR="${2}"
       shift # past argument
@@ -130,7 +142,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     -pfx|--pfx)
       CREATE_PFX=true
+      PFX_EXPORT_PW="${2}"
       shift # past argument
+      shift # past value
       ;;
     -s|--silent)
       SILENT=true
@@ -146,7 +160,8 @@ while [[ $# -gt 0 ]]; do
       echo "-a|--alg - The signature algorithm. Default: ${CRT_SIG_ALG}"
       echo "-d|--days - The number of days the certificate is valid. Default: ${CRT_DAYS}"
       echo "-o|--output-dir - The output directory. Default: ${WK_DEFAULT}"
-      echo "-pfx|--pfx - Create a PKCS12 file. Default: False"
+      echo "-kp|--key-password - The password to use for the private key. Default: None (unencrypted)"
+      echo "-pfx|--pfx '<export password>' - Create a PKCS12 file. Default: False"
       echo "-s|--silent - Don't output anything."
       echo "-f|--force - Overwrite existing files."
       echo "Subject Metadata options:"
@@ -187,7 +202,9 @@ function init_workdir() {
 WORKDIR=$(init_workdir "${WORKDIR}")
 log_shell "INFO: Output Directory: ${WORKDIR}"
 
+################################################################################
 # Create a new array of formatted SANs
+################################################################################
 CRT_SANS="" # Initialize the SANs string
 ct=0
 for san in ${CRT_IP_SANS[@]}; do
@@ -203,7 +220,9 @@ for san in ${CRT_DNS_SANS[@]}; do
     CRT_SANS+="DNS.${ct} = ${san}\n"
 done
 
+################################################################################
 # Create the openssl config file
+################################################################################
 CONF_FILE="${WORKDIR}/openssl.conf"
 MAKE_NEW=true
 if [[ -e "${CONF_FILE}" ]] && ! ${FORCE}; then
@@ -225,7 +244,7 @@ string_mask        = utf8only
 prompt             = no
 
 [ v3_req ]
-nsComment            = "Created By: $(basename ${0})"
+nsComment            = "Created By: ${APP_NAME} v${APP_VER}"
 keyUsage             = keyEncipherment, dataEncipherment
 extendedKeyUsage     = serverAuth
 ${V3_REQ_OPTS}
@@ -246,7 +265,9 @@ EOF
     fi
 fi
 
+################################################################################
 # Create the private key file
+################################################################################
 KEY_FILE="${WORKDIR}/key.pem"
 MAKE_NEW=true
 if [[ -e "${KEY_FILE}" ]] && ! ${FORCE}; then
@@ -256,14 +277,28 @@ fi
 if ! ${MAKE_NEW}; then
     log_shell "INFO: Using the existing private key file"
 else
-    log_shell "INFO: Creating new private key"
-    openssl ecparam -name ${CRT_ECC_CURVE} -genkey -noout -outform PEM -out "${KEY_FILE}"
+    if [[ -z "${KEY_PW}" ]]; then
+        log_shell "INFO: Creating new unencrypted private key"
+        openssl ecparam -name ${CRT_ECC_CURVE} -genkey -noout -outform PEM -out "${KEY_FILE}"
+    else
+        log_shell "INFO: Creating new encrypted private key"
+        echo -n "${KEY_PW}" > "${KEY_FILE}.pw" && chmod 600 "${KEY_FILE}.pw"
+        openssl ecparam -name ${CRT_ECC_CURVE} -out "${WORKDIR}/ecparam.pem"
+        openssl genpkey -paramfile "${WORKDIR}/ecparam.pem" -aes-128-cbc -pass file:"${KEY_FILE}.pw" -out "${KEY_FILE}"
+        rm -f "${WORKDIR}/ecparam.pem"
+    fi
 fi
 
+################################################################################
 # Create the certificate
+################################################################################
 CRT_FILE="${WORKDIR}/cert.pem"
 PFX_FILE="${WORKDIR}/cert.pfx"
-openssl req -new -x509 -${CRT_SIG_ALG} -nodes \
+if [[ -n "${KEY_PW}" ]]; then
+    ARGS="-passin file:${KEY_FILE}.pw "
+fi
+log_shell "INFO: Creating new TLS certificate"
+openssl req -new -x509 -${CRT_SIG_ALG} -nodes ${ARGS} \
     -config "${CONF_FILE}" \
     -key "${KEY_FILE}" \
     -out "${CRT_FILE}" \
@@ -274,12 +309,15 @@ if [[ ${?} -eq 0 ]]; then
   if ! ${SILENT}; then  openssl x509 -text -noout -in "${CRT_FILE}"; fi
   log_shell "INFO: Certificate created successfully."
   log_shell "INFO: Certificate: ${CRT_FILE}"
+
   log_shell "INFO: Private Key: ${KEY_FILE}"
   if ${CREATE_PFX}; then
-      openssl pkcs12 -aes256 -export -keyex \
+      echo -n "${PFX_EXPORT_PW}" > "${PFX_FILE}.pw" && chmod 600 "${PFX_FILE}.pw"
+      openssl pkcs12 -aes256 -export -keyex ${ARGS} \
        -in "${CRT_FILE}" \
        -inkey "${KEY_FILE}" \
-       -out "${PFX_FILE}"
+       -out "${PFX_FILE}" \
+       -password file:"${PFX_FILE}.pw"
       log_shell "INFO: PFX File: ${PFX_FILE}"
   fi
 else
