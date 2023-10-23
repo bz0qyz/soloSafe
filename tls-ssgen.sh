@@ -4,22 +4,34 @@ declare -A CRT
 declare -A CRT_SUBJ
 declare -a CRT_DNS_SANS
 declare -a CRT_IP_SANS
+
 CRT[SIG_ALG]='sha512'
 CRT[ECC_CURVE]='prime256v1'
 CRT[DAYS]=365
 CRT_SUBJ[CN]='localhost.localdomain'
-LH_DNS_SANS=("localhost", "localhost.localdomain", "localhost4.localdomain4"  "lvh.me")
+LH_DNS_SANS=("localhost" "localhost.localdomain" "lvh.me")
 LH_IP_SANS=("127.0.0.1")
+WK_DEFAULT="./output"
 
 function add_if_not_exists() {
     ITEM=${1} # Value to add if it does not exist
     LIST=${2} # Existing list
-    echo "checking ${1} in ${2[@]}"
+    echo "checking ${1} in ${2[*]}"
     if ((! $LIST[(Ie)$ITEM])); then
         echo "Adding ${ITEM} to list"
         LIST+=("${ITEM}")
     fi
 
+}
+function exists_in_list() {
+    ITEM=${1} # Value to add if it does not exist
+    LIST=${2} # Existing list
+    echo "checking ${1} in ${2[*]}"
+    if ((! $LIST[(Ie)$ITEM])); then
+        return true
+    else
+        return false
+    fi
 }
 
 # Process passed arguments
@@ -33,7 +45,7 @@ while [[ $# -gt 0 ]]; do
       shift # past value
       ;;
     --san-dns)
-      add_if_not_exists "${2}" ${CRT_DNS_SANS}
+      add_if_not_exists "${2}" ${CRT_DNS_SANS[@]}
       shift # past argument
       shift # past value
       ;;
@@ -67,6 +79,11 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    -o|--output-dir)
+      WORKDIR="${2}"
+      shift # past argument
+      shift # past value
+      ;;
     -h|--help)
       echo -e "Usage ${0} [-cn www.domain.com][-a <sig algorithm> -c <curve>]\n"
       echo "-c|--curve - The ENV Variable prefix (without trailing underscores)"
@@ -81,14 +98,31 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-WORKDIR=$(mktemp -d -p '/tmp' -t 'openssl_')
-echo ${WORKDIR}
-for san in ${CRT_DNS_SANS[@]}; do
-    echo "SAN: ${san}"
+function init_workdir() {
+  # Initialize the output dir or generate one
+  [[ -d "${WK_DEFAULT}" ]] || mkdir -p "${WK_DEFAULT}"
+  
+  if [[ -z "${1}" ]]; then
+    echo "Generating an output directory"
+    WORKDIR="${WK_DEFAULT}/${CRT_SUBJ[CN]}"
+  else
+    WORKDIR="${1}"
+  fi
+  if [[ ! -d "${WORKDIR}" ]] && mkdir -p "${WORKDIR}"
+  echo "${WORKDIR}"
+}
+
+WORKDIR=$(init_workdir)
+echo "${WORKDIR}"
+
+# for san in ${CRT_DNS_SANS[@]}; do
+for san in ${LH_DNS_SANS[@]}; do
+    echo "- DNS:${san}"
 done
 
-for san in ${CRT_DNS_SANS[@]}; do
-    echo "SAN: ${san}"
+for san in ${LH_IP_SANS[@]}; do
+# for san in ${CRT_IP_SANS[@]}; do
+    echo "- IP:${san}"
 done
 
 rm -rf ${WORKDIR}
