@@ -1,7 +1,7 @@
 #!/usr/bin/env bash -e
 
 APP_NAME='tls-ssgen'
-APP_VER='0.0.1'
+APP_VER='0.0.2'
 
 # Argument Defaults
 declare -a CRT_DNS_SANS
@@ -31,6 +31,10 @@ PFX_EXPORT_PW=""
 LH_DNS_SANS=("localhost" "localhost.localdomain")
 LH_IP_SANS=("::1" "127.0.0.1")
 
+# Load config defaults from a file if it exists
+[[ -e "./${APP_NAME}.conf" ]] && source "./${APP_NAME}.conf"
+[[ -e "~/.${APP_NAME}.conf" ]] && source "~/.${APP_NAME}.conf"
+
 function is_unique() {
     ITEM=${1} # Value to add if it does not exist
     LIST=${2} # Existing list
@@ -43,7 +47,27 @@ function is_unique() {
 }
 
 function log_shell() {
-    if ! ${SILENT}; then echo -e "${1}"; fi
+    NC='\033[0m' # No Color
+    RED='\033[0;31m'
+    YLW='\033[1;33m'
+    GRN='\033[0;32m'
+    MSG="${1}"
+    PREFIX=$(echo "${MSG}" | sed 's/[][]//g' | awk -F: '{print $1}')
+    case "${PREFIX}" in
+        INFO)
+            MSG="${GRN}${MSG}${NC}"
+            ;;
+        WARN)
+            MSG="${YLW}${MSG}${NC}"
+            ;;
+        ERROR)
+            MSG="${RED}${MSG}${NC}"
+            ;;
+        *)
+            MSG="${MSG}"
+            ;;
+    esac
+    if ! ${SILENT}; then echo -e "${MSG}"; fi
 }
 
 # Process passed arguments
@@ -135,14 +159,22 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    -pfx|--pfx)
+      CREATE_PFX=true
+      PFX_EXPORT_PW="${2}"
+      shift # past argument
+      shift # past value
+      ;;
     -o|--output-dir)
       WORKDIR="${2}"
       shift # past argument
       shift # past value
       ;;
-    -pfx|--pfx)
-      CREATE_PFX=true
-      PFX_EXPORT_PW="${2}"
+    -env|--env-file)
+      if [[ -e "${2}" ]]; then
+        log_shell "[WARN]: Loading environment file. This may overwrite existing variables."
+        source "${2}"
+      fi
       shift # past argument
       shift # past value
       ;;
@@ -155,15 +187,18 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       ;;
     -h|--help)
-      echo -e "Usage ${0} [-cn www.domain.com][-a <sig algorithm> -c <curve>]\n"
+      echo -e "Usage ${0} [-cn www.domain.com] [OPTIONS]\n"
+      echo "OPTIONS:"
+      echo "-env|--env-file - A file containing environment variables to load. Default: None"
+      echo "-s|--silent - Don't output anything."
+      echo "-f|--force - Overwrite existing files."
+      echo "-o|--output-dir - The output directory. Default: ${WK_DEFAULT}"
       echo "-c|--curve - The ecc curve to use for the key. Default: ${CRT_ECC_CURVE}"
       echo "-a|--alg - The signature algorithm. Default: ${CRT_SIG_ALG}"
       echo "-d|--days - The number of days the certificate is valid. Default: ${CRT_DAYS}"
-      echo "-o|--output-dir - The output directory. Default: ${WK_DEFAULT}"
       echo "-kp|--key-password - The password to use for the private key. Default: None (unencrypted)"
-      echo "-pfx|--pfx '<export password>' - Create a PKCS12 file. Default: False"
-      echo "-s|--silent - Don't output anything."
-      echo "-f|--force - Overwrite existing files."
+      echo "-pfx|--pfx '<export password>' - Create a PKCS12 file and specify the export password. Default: False"
+
       echo "Subject Metadata options:"
         echo "  -cn|--cn - The common name. Default: ${CRT_SUBJ_CN}"
         echo "  -org|--organization - The organization name. Default: ${CRT_SUBJ_O}"
@@ -191,7 +226,7 @@ function init_workdir() {
   [[ -d "${WK_DEFAULT}" ]] || mkdir -p "${WK_DEFAULT}"
 
   if [[ -z "${1}" ]]; then
-    WORKDIR="${WK_DEFAULT}/${CRT_SUBJ_CN}"
+    WORKDIR="${WK_DEFAULT}/$(echo ${CRT_SUBJ_CN} | sed 's/\*/wildcard/g')"
   else
     WORKDIR="${1}"
   fi
@@ -199,8 +234,8 @@ function init_workdir() {
   echo "${WORKDIR}"
 }
 
-WORKDIR=$(init_workdir "${WORKDIR}")
-log_shell "INFO: Output Directory: ${WORKDIR}"
+# Set the working/output directory
+WORKDIR=$(init_workdir "${WORKDIR}") && log_shell "INFO: Output Directory: ${WORKDIR}"
 
 ################################################################################
 # Create a new array of formatted SANs
@@ -230,7 +265,7 @@ if [[ -e "${CONF_FILE}" ]] && ! ${FORCE}; then
   MAKE_NEW=${FORCE}
 fi
 if ! ${MAKE_NEW}; then
-    log_shell "INFO: Using the existing openssl config file"
+    log_shell "WARN: Using the existing openssl config file"
 else
     log_shell "INFO: Creating new openssl config file"
     if [[ ${#CRT_SANS} -gt 0 ]]; then
@@ -275,7 +310,7 @@ if [[ -e "${KEY_FILE}" ]] && ! ${FORCE}; then
   MAKE_NEW=${FORCE}
 fi
 if ! ${MAKE_NEW}; then
-    log_shell "INFO: Using the existing private key file"
+    log_shell "WARN: Using the existing private key file"
 else
     if [[ -z "${KEY_PW}" ]]; then
         log_shell "INFO: Creating new unencrypted private key"
@@ -294,34 +329,49 @@ fi
 ################################################################################
 CRT_FILE="${WORKDIR}/cert.pem"
 PFX_FILE="${WORKDIR}/cert.pfx"
-if [[ -n "${KEY_PW}" ]]; then
-    ARGS="-passin file:${KEY_FILE}.pw "
+MAKE_NEW=true
+if [[ -e "${CRT_FILE}" ]] && ! ${FORCE}; then
+  log_shell "ERROR: ${CRT_FILE} exists. Use -f|--force to overwrite."
+  MAKE_NEW=${FORCE}
 fi
-log_shell "INFO: Creating new TLS certificate"
-openssl req -new -x509 -${CRT_SIG_ALG} -nodes ${ARGS} \
-    -config "${CONF_FILE}" \
-    -key "${KEY_FILE}" \
-    -out "${CRT_FILE}" \
-    -days ${CRT_DAYS}  \
-    -extensions 'v3_req'
-
-if [[ ${?} -eq 0 ]]; then
-  if ! ${SILENT}; then  openssl x509 -text -noout -in "${CRT_FILE}"; fi
-  log_shell "INFO: Certificate created successfully."
-  log_shell "INFO: Certificate: ${CRT_FILE}"
-
-  log_shell "INFO: Private Key: ${KEY_FILE}"
-  if ${CREATE_PFX}; then
-      echo -n "${PFX_EXPORT_PW}" > "${PFX_FILE}.pw" && chmod 600 "${PFX_FILE}.pw"
-      openssl pkcs12 -aes256 -export -keyex ${ARGS} \
-       -in "${CRT_FILE}" \
-       -inkey "${KEY_FILE}" \
-       -out "${PFX_FILE}" \
-       -password file:"${PFX_FILE}.pw"
-      log_shell "INFO: PFX File: ${PFX_FILE}"
-  fi
+if ! ${MAKE_NEW}; then
+    log_shell "WARN: Preserving the existing certificate file"
 else
-  log_shell "ERROR: Certificate creation failed."
+
+    if [[ -n "${KEY_PW}" ]]; then
+        ARGS="-passin file:${KEY_FILE}.pw "
+    fi
+    log_shell "INFO: Creating new TLS certificate"
+    openssl req -new -x509 -${CRT_SIG_ALG} -nodes ${ARGS} \
+        -config "${CONF_FILE}" \
+        -key "${KEY_FILE}" \
+        -out "${CRT_FILE}" \
+        -days ${CRT_DAYS}  \
+        -extensions 'v3_req'
+
+    if [[ ${?} -eq 0 ]]; then
+      if ! ${SILENT}; then
+          echo "###########################################################"
+          openssl x509  -noout -in "${CRT_FILE}" -text \
+            -certopt no_header,no_version,no_signame,no_issuer,no_pubkey,no_aux
+          echo "###########################################################"
+      fi
+      log_shell "INFO: Certificate created successfully."
+      log_shell "INFO: Certificate: ${CRT_FILE}"
+
+      log_shell "INFO: Private Key: ${KEY_FILE}"
+      if ${CREATE_PFX}; then
+          echo -n "${PFX_EXPORT_PW}" > "${PFX_FILE}.pw" && chmod 600 "${PFX_FILE}.pw"
+          openssl pkcs12 -aes256 -export -keyex ${ARGS} \
+           -in "${CRT_FILE}" \
+           -inkey "${KEY_FILE}" \
+           -out "${PFX_FILE}" \
+           -password file:"${PFX_FILE}.pw"
+          log_shell "INFO: PFX File: ${PFX_FILE}"
+      fi
+    else
+      log_shell "ERROR: Certificate creation failed."
+    fi
 fi
 
 exit 0

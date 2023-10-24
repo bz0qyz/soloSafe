@@ -1,3 +1,6 @@
 *.key
 output/**
+ssl/**
+tls/**
 .idea/**
+tls-ssgen-*.conf
