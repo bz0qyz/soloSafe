@@ -1,6 +1,7 @@
 *.key
+*.crt
 output/**
 ssl/**
 tls/**
 .idea/**
-tls-ssgen-*.conf
+soloSafe-*.conf

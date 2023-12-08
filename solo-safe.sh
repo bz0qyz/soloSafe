@@ -1,7 +1,8 @@
 #!/usr/bin/env bash -e
 
-APP_NAME='tls-ssgen'
-APP_VER='0.0.2'
+APP_NAME='soloSafe'
+APP_DESC='A simple TLS self-signed certificate and key generator.'
+APP_VER='1.0.1'
 
 # Argument Defaults
 declare -a CRT_DNS_SANS
@@ -11,6 +12,7 @@ declare -a CRT_IP_SANS
 WK_DEFAULT="./output"
 SILENT=false
 FORCE=false
+PW_LENGTH=64
 # Certificate Defaults
 CRT_SUBJ=""
 CRT_SANS=""
@@ -68,6 +70,75 @@ function log_shell() {
             ;;
     esac
     if ! ${SILENT}; then echo -e "${MSG}"; fi
+}
+
+function show_get_help() {
+    local NC='\033[0m' # No Color
+    local RED='\033[0;31m'
+    local YLW='\033[1;33m'
+    local GRN='\033[0;32m'
+    local GRY='\033[0;37m'
+    echo -e "${GRN}Usage: ${0} [-cn www.domain.com] [OPTIONS]\n"
+      echo -e "${YLW}OPTIONS:${GRY}"
+      echo "-env|--env-file - A file containing environment variables to load. Default: None"
+      echo "-s|--silent - Don't output anything."
+      echo "-f|--force - Overwrite existing files."
+      echo "-o|--output-dir - The output directory. Default: ${WK_DEFAULT}"
+      echo "-c|--curve - The ecc curve to use for the key. Default: ${CRT_ECC_CURVE}"
+      echo "-a|--alg - The signature algorithm. Default: ${CRT_SIG_ALG}"
+      echo "-d|--days - The number of days the certificate is valid. Default: ${CRT_DAYS}"
+      echo -e "${YLW}Private Key Password: ${GRN}Use 'autogen:64' to generate a 64 character random password.${GRY}"
+      echo "  -kp|--key-password - The password to use for the private key. Default: None (unencrypted)"
+      echo -e "${YLW}PFX/PKCS12 Generation: ${GRN}Use 'autogen:64' to generate a 64 character random password.${GRY}"
+      echo "  -pfx|--pfx '<export password>' - Create a PKCS12 file and specify the export password. Default: False"
+      echo -e "${YLW}Subject Metadata options:${GRY}"
+        echo "  -cn|--cn - The common name. Default: ${CRT_SUBJ_CN}"
+        echo "  -org|--organization - The organization name. Default: ${CRT_SUBJ_O}"
+        echo "  -ou|--organizational-unit - The organizational unit name. Default: ${CRT_SUBJ_OU}"
+        echo "  -c|--country - The country name. Default: ${CRT_SUBJ_C}"
+        echo "  -st|--state - The state name. Default: ${CRT_SUBJ_ST}"
+        echo "  -ct|--locality|--city - The locality name. Default: ${CRT_SUBJ_L}"
+        echo "  -e|--email - The email address. Default: ${CRT_SUBJ_E}"
+      echo -e "${YLW}Subject Alternative Name options:${GRY}"
+        echo "  -l|--localhost - Add all default localhost SANs."
+        echo "  --san-dns - Add a DNS Subject Alternative Name. Multiple allowed."
+        echo "  --san-ip - Add an IP Subject Alternative Name. Multiple allowed."
+      echo -e "\n${GRN}EXAMPLE: ${0} -cn host.domain.com -san"
+      echo -e "${NC}"
+      exit 0
+}
+
+function generate_password() {
+    # Generate a random key password
+    length=${1:-64}
+    echo $(openssl rand -base64 "$((length * 3 / 4))" | tr -d '/+=')
+}
+
+function verify_pw_length() {
+    # Verify the password length is a number
+    if [[ ! "${1}" =~ ^[0-9]+$ ]]; then
+        log_shell "ERROR: Invalid key password length: \"${1}\". Must be a number."
+        exit 1
+    fi
+    return 0
+}
+
+function parse_autogen() {
+    # Convert an autogen password argument to a random password
+    arg=${1}
+    # Save the IFS value and set it to the delimiter
+    CIFS=${IFS} && IFS=":"
+    # Create an array by splitting the string
+    read -ra split_array <<< "${1}"
+    # Restore the IFS value
+    IFS=${CIFS}
+    length=${split_array[1]}
+    # If the password length is not specified, use the default
+    if [[ -z "${length}" ]]; then
+        echo ${PW_LENGTH}
+    fi
+    # echo the length value
+    echo ${length}
 }
 
 # Process passed arguments
@@ -156,12 +227,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     -kp|--key-password)
       KEY_PW="${2}"
+      if [[ ${KEY_PW} =~ 'autogen:' ]]; then
+        log_shell "INFO: Generating random password for the private key"
+        length=$(parse_autogen "${KEY_PW}")
+        if verify_pw_length "${length}"; then
+            KEY_PW=$(generate_password "${length}")
+        fi
+      fi
       shift # past argument
       shift # past value
       ;;
     -pfx|--pfx)
       CREATE_PFX=true
       PFX_EXPORT_PW="${2}"
+      if [[ ${PFX_EXPORT_PW} =~ 'autogen:' ]]; then
+        log_shell "INFO: Generating random password for the PFX export"
+        length=$(parse_autogen "${PFX_EXPORT_PW}")
+        if verify_pw_length "${length}"; then
+            PFX_EXPORT_PW=$(generate_password "${length}")
+        fi
+      fi
       shift # past argument
       shift # past value
       ;;
@@ -187,32 +272,7 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       ;;
     -h|--help)
-      echo -e "Usage ${0} [-cn www.domain.com] [OPTIONS]\n"
-      echo "OPTIONS:"
-      echo "-env|--env-file - A file containing environment variables to load. Default: None"
-      echo "-s|--silent - Don't output anything."
-      echo "-f|--force - Overwrite existing files."
-      echo "-o|--output-dir - The output directory. Default: ${WK_DEFAULT}"
-      echo "-c|--curve - The ecc curve to use for the key. Default: ${CRT_ECC_CURVE}"
-      echo "-a|--alg - The signature algorithm. Default: ${CRT_SIG_ALG}"
-      echo "-d|--days - The number of days the certificate is valid. Default: ${CRT_DAYS}"
-      echo "-kp|--key-password - The password to use for the private key. Default: None (unencrypted)"
-      echo "-pfx|--pfx '<export password>' - Create a PKCS12 file and specify the export password. Default: False"
-
-      echo "Subject Metadata options:"
-        echo "  -cn|--cn - The common name. Default: ${CRT_SUBJ_CN}"
-        echo "  -org|--organization - The organization name. Default: ${CRT_SUBJ_O}"
-        echo "  -ou|--organizational-unit - The organizational unit name. Default: ${CRT_SUBJ_OU}"
-        echo "  -c|--country - The country name. Default: ${CRT_SUBJ_C}"
-        echo "  -st|--state - The state name. Default: ${CRT_SUBJ_ST}"
-        echo "  -ct|--locality|--city - The locality name. Default: ${CRT_SUBJ_L}"
-        echo "  -e|--email - The email address. Default: ${CRT_SUBJ_E}"
-      echo "Subject Alternative Name options:"
-        echo "  -l|--localhost - Add all default localhost SANs."
-        echo "  --san-dns - Add a DNS Subject Alternative Name. Multiple allowed."
-        echo "  --san-ip - Add an IP Subject Alternative Name. Multiple allowed."
-      echo -e "\nEXAMPLE: ${0} -cn host.domain.com -san"
-      exit 0
+      show_get_help
       ;;
     *)    # unknown option
       POSITIONAL+=("$1") # save it in an array for later
@@ -232,6 +292,78 @@ function init_workdir() {
   fi
   [[ -d "${WORKDIR}" ]] || mkdir -p "${WORKDIR}"
   echo "${WORKDIR}"
+}
+
+function verify_cert_key() {
+    # Set default values
+    VERB=false
+    CERT="${WORKDIR}/cert.pem}"
+    KEY="${WORKDIR}/key.pem}"
+
+    # Process passed arguments
+    while [[ $# -gt 0 ]]; do
+      key="$1"
+      case $key in
+        -c|--cert)
+          CERT="${2}"
+          shift # past argument
+          shift # past value
+          ;;
+        -k|--key)
+          KEY="${2}"
+          shift # past argument
+          shift # past value
+          ;;
+        -p|--password-file)
+            KEY_PW_FILE="${2}"
+            shift # past argument
+            shift # past value
+            ;;
+        -v|--verbose)
+          VERB=true
+          shift # past argument
+          ;;
+        -h|--help)
+          echo -e "Verify that a TLS certificate and key match.\n"
+          echo -e "Usage ${0} -c cert.pem -k key.pem -v \n"
+          echo "OPTIONS:"
+          echo "-c|--cert - The private key file. default: \"${CERT}\""
+          echo "-k|--key - The private key file. default: \"${KEY}\""
+          echo "-v|--verbose - show the public keys for the cert and key."
+          exit 0
+          ;;
+      esac
+    done
+
+    # Verify the files exist
+    [[ ! -e "${CERT}" ]] && echo "[ERROR] Certificate file not found: \"${CERT}\"" && exit 1
+    [[ ! -e "${KEY}" ]] && echo "[ERROR] Certificate file not found: \"${KEY}\"" && exit 1
+
+    log_shell "INFO: Verifying certificate and key match"
+
+    # Get the public key for the certificate
+    certPubKey=$(openssl x509 -noout -pubkey -in "${CERT}")
+    if ${VERB}; then
+      echo "Certificate Public Key:"
+      echo "${certPubKey}"
+    fi
+    # Get the public key from the private key
+    if [[ -n "${KEY_PW_FILE}" ]]; then
+        OPTS="-passin file:${KEY_PW_FILE}"
+    fi
+    keyPubKey=$(openssl pkey -pubout -in "${KEY}" ${OPTS})
+    if ${VERB}; then
+      echo "Private Key Public Key:"
+      echo "${keyPubKey}"
+    fi
+    # Compare the public keys
+    if [[ "${certPubKey}" == "${keyPubKey}" ]]; then
+      log_shell "INFO: Passed - key and cert match"
+      return 0
+    else
+      log_shell "ERROR: Failed - key and cert DO NOT match"
+      return 1
+    fi
 }
 
 # Set the working/output directory
@@ -374,5 +506,19 @@ else
     fi
 fi
 
-exit 0
+################################################################################
+# Verify the certificate and key
+################################################################################
+#if ! $SILENT; then OPTS='-v' ;fi
+if [[ -n "${KEY_FILE}.pw" ]] && [[ -n "${KEY_FILE}" ]]; then
+    OPTS="${OPTS} -p ${KEY_FILE}.pw"
+fi
+
+if [[ $(verify_cert_key -c "${CRT_FILE}" -k "${KEY_FILE}" ${OPTS}) ]]; then
+    exit 0
+else
+    exit 1
+fi
+
+
 
