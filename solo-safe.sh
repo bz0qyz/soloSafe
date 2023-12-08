@@ -314,7 +314,7 @@ function verify_cert_key() {
           shift # past argument
           shift # past value
           ;;
-        -p|--password-file)
+        -kp|--key-password)
             KEY_PW_FILE="${2}"
             shift # past argument
             shift # past value
@@ -349,7 +349,7 @@ function verify_cert_key() {
     fi
     # Get the public key from the private key
     if [[ -n "${KEY_PW_FILE}" ]]; then
-        OPTS="-passin file:${KEY_PW_FILE}"
+        OPTS="-passin ${KEY_PW_FILE}"
     fi
     keyPubKey=$(openssl pkey -pubout -in "${KEY}" ${OPTS})
     if ${VERB}; then
@@ -498,7 +498,7 @@ else
            -in "${CRT_FILE}" \
            -inkey "${KEY_FILE}" \
            -out "${PFX_FILE}" \
-           -password file:"${PFX_FILE}.pw"
+           -password file:"${PFX_FILE}.pw" ${ARGS}
           log_shell "INFO: PFX File: ${PFX_FILE}"
       fi
     else
@@ -510,11 +510,12 @@ fi
 # Verify the certificate and key
 ################################################################################
 #if ! $SILENT; then OPTS='-v' ;fi
-if [[ -n "${KEY_FILE}.pw" ]] && [[ -n "${KEY_FILE}" ]]; then
-    OPTS="${OPTS} -p ${KEY_FILE}.pw"
+if [[ -e "${KEY_FILE}.pw" ]] && [[ -n "${KEY_FILE}" ]]; then
+    OPTS="${OPTS} -kp file:${KEY_FILE}.pw"
 fi
 
-if [[ $(verify_cert_key -c "${CRT_FILE}" -k "${KEY_FILE}" ${OPTS}) ]]; then
+verify_cert_key -c "${CRT_FILE}" -k "${KEY_FILE}" ${OPTS}
+if [[ ${?} -eq 0 ]]; then
     exit 0
 else
     exit 1
