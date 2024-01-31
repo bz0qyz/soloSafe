@@ -412,8 +412,8 @@ prompt             = no
 
 [ v3_req ]
 nsComment            = "Created By: ${APP_NAME} v${APP_VER}"
-keyUsage             = keyEncipherment, dataEncipherment
-extendedKeyUsage     = serverAuth
+keyUsage             = critical, nonRepudiation, digitalSignature, keyEncipherment, keyAgreement, dataEncipherment
+extendedKeyUsage     = critial, serverAuth
 ${V3_REQ_OPTS}
 
 [req_distinguished_name]
