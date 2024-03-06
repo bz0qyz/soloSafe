@@ -1,4 +1,4 @@
-#!/usr/bin/env bash -e
+#!/usr/bin/env bash
 
 APP_NAME='soloSafe'
 APP_DESC='A simple TLS self-signed certificate and key generator.'
