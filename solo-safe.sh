@@ -2,7 +2,7 @@
 
 APP_NAME='soloSafe'
 APP_DESC='A simple TLS self-signed certificate and key generator.'
-APP_VER='1.0.1'
+APP_VER='1.0.2'
 
 # Argument Defaults
 declare -a CRT_DNS_SANS
@@ -13,6 +13,9 @@ WK_DEFAULT="./output"
 SILENT=false
 FORCE=false
 PW_LENGTH=64
+KEY_FILE="key.pem"
+CRT_FILE="cert.pem"
+PFX_FILE="cert.pfx"
 # Certificate Defaults
 CRT_SUBJ=""
 CRT_SANS=""
@@ -84,6 +87,9 @@ function show_get_help() {
       echo "-s|--silent - Don't output anything."
       echo "-f|--force - Overwrite existing files."
       echo "-o|--output-dir - The output directory. Default: ${WK_DEFAULT}"
+      echo "-kf|--key-file - The name of the key file in the output. Default: ${KEY_FILE}"
+      echo "-cf|--cert-file - The name of the cert file in the output. Default: ${CRT_FILE}"
+      echo "-pf|--pfx-file - The name of the pfx file in the output. Default: ${PFX_FILE}"
       echo "-c|--curve - The ecc curve to use for the key. Default: ${CRT_ECC_CURVE}"
       echo "-a|--alg - The signature algorithm. Default: ${CRT_SIG_ALG}"
       echo "-d|--days - The number of days the certificate is valid. Default: ${CRT_DAYS}"
@@ -146,6 +152,21 @@ POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   key="$1"
   case $key in
+    -kf|--key-file)
+      KEY_FILE="${2}"
+      shift # past argument
+      shift # past value
+      ;;
+   -cf|--cert-file)
+      CRT_FILE="${2}"
+      shift # past argument
+      shift # past value
+      ;;
+    -pf|--pfx-file)
+      PFX_FILE="${2}"
+      shift # past argument
+      shift # past value
+      ;;
     -cn|--cn)
       CRT_SUBJ_CN="${2}"
       shift # past argument
@@ -297,8 +318,8 @@ function init_workdir() {
 function verify_cert_key() {
     # Set default values
     VERB=false
-    CERT="${WORKDIR}/cert.pem}"
-    KEY="${WORKDIR}/key.pem}"
+    CERT="${WORKDIR}/${CERT_FILE}"
+    KEY="${WORKDIR}/${KEY_FILE}}"
 
     # Process passed arguments
     while [[ $# -gt 0 ]]; do
@@ -435,7 +456,7 @@ fi
 ################################################################################
 # Create the private key file
 ################################################################################
-KEY_FILE="${WORKDIR}/key.pem"
+KEY_FILE="${WORKDIR}/${KEY_FILE}"
 MAKE_NEW=true
 if [[ -e "${KEY_FILE}" ]] && ! ${FORCE}; then
   log_shell "ERROR: ${KEY_FILE} exists. Use -f|--force to overwrite."
@@ -459,8 +480,8 @@ fi
 ################################################################################
 # Create the certificate
 ################################################################################
-CRT_FILE="${WORKDIR}/cert.pem"
-PFX_FILE="${WORKDIR}/cert.pfx"
+CRT_FILE="${WORKDIR}/${CRT_FILE}"
+PFX_FILE="${WORKDIR}/${PFX_FILE}"
 MAKE_NEW=true
 if [[ -e "${CRT_FILE}" ]] && ! ${FORCE}; then
   log_shell "ERROR: ${CRT_FILE} exists. Use -f|--force to overwrite."
