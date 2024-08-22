@@ -2,7 +2,7 @@
 
 APP_NAME='soloSafe'
 APP_DESC='A simple TLS self-signed certificate and key generator.'
-APP_VER='1.0.2'
+APP_VER='1.0.3'
 
 # Argument Defaults
 declare -a CRT_DNS_SANS
@@ -304,8 +304,6 @@ done
 
 function init_workdir() {
   # Initialize the output dir or generate one
-  [[ -d "${WK_DEFAULT}" ]] || mkdir -p "${WK_DEFAULT}"
-
   if [[ -z "${1}" ]]; then
     WORKDIR="${WK_DEFAULT}/$(echo ${CRT_SUBJ_CN} | sed 's/\*/wildcard/g')"
   else
