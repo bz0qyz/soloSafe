@@ -1,6 +1,11 @@
 # soloSafe
 A simple TLS self-signed certificate and key generator.
 
+## DEPRECATED
+This project has been replaced by a more comprehensive python script that supports self-signed CA and CA signed certificates.
+
+Take a look at [tls-simple](https://github.com/bz0qyz/tls-simple)
+
 ## Usage
 `bash solo-safe.sh -cn <common name> [ <OPTIONS> ]`
 
